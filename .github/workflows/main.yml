@@ -1,17 +1,29 @@
-- name: Compiler et Créer l'exécutable
-      run: |
-        # 1. Installation des dépendances Python
-        pip3 install --break-system-packages selenium pillow img2pdf pyinstaller
-        
-        # 2. Compilation en un fichier unique
-        python3 -m PyInstaller --onefile --noconsole --name "SushiApp_Linux" main.py
-        
-        # 3. On ne s'embête plus avec l'AppImage pour l'instant, 
-        # on récupère directement l'exécutable Linux qui fonctionne partout !
-        cp dist/SushiApp_Linux .
+name: Compilation Linux
 
-    - name: Sauvegarder l'application
-      uses: actions/upload-artifact@v4
-      with:
-        name: SushiScan_Linux_Raspberry
-        path: SushiApp_Linux
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - name: Code
+        uses: actions/checkout@v4
+
+      - name: Setup
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip python3-tk binutils
+          pip3 install --break-system-packages selenium pillow img2pdf pyinstaller
+
+      - name: Build
+        run: |
+          python3 -m PyInstaller --onefile --noconsole --name "SushiApp_Linux" main.py
+
+      - name: Save
+        uses: actions/upload-artifact@v4
+        with:
+          name: SushiScan_Linux
+          path: dist/SushiApp_Linux
