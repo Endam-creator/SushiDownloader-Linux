@@ -7,7 +7,35 @@ on:
 
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: name: Compilation Linux
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code
+        uses: actions/checkout@v4
+
+      - name: Setup
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip python3-tk binutils
+          pip3 install --break-system-packages selenium pillow img2pdf pyinstaller
+
+      - name: Build
+        run: |
+          python3 -m PyInstaller --onefile --noconsole --name "SushiApp_Linux" main.py
+
+      - name: Save
+        uses: actions/upload-artifact@v4
+        with:
+          name: SushiScan_Linux
+          path: dist/SushiApp_Linu
     steps:
       - name: Code
         uses: actions/checkout@v4
