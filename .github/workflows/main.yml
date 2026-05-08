@@ -1,57 +1,17 @@
-name: Compilation Linux AppImage
-
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: self-hosted
-
-    steps:
-    - name: Récupérer le code
-      uses: actions/checkout@v4
-
-    - name: Installation des outils système
+- name: Compiler et Créer l'exécutable
       run: |
-        sudo apt-get update
-        sudo apt-get install -y python3-pip python3-tk wget binutils libfuse2
-
-    - name: Installation des bibliothèques Python
-      run: |
+        # 1. Installation des dépendances Python
         pip3 install --break-system-packages selenium pillow img2pdf pyinstaller
-
-    - name: Compiler avec PyInstaller
-      run: |
-        python3 -m PyInstaller --onefile --noconsole --name "SushiApp" main.py
-
-    - name: Créer l'AppImage
-      run: |
-        # 1. Préparer le dossier
-        mkdir -p AppDir/usr/bin
-        cp dist/SushiApp AppDir/usr/bin/
         
-        # 2. Créer l'exécuteur (AppRun)
-        echo '#!/bin/sh' > AppDir/AppRun
-        echo 'exec "${0%/*}/usr/bin/SushiApp" "$@"' >> AppDir/AppRun
-        chmod +x AppDir/AppRun
+        # 2. Compilation en un fichier unique
+        python3 -m PyInstaller --onefile --noconsole --name "SushiApp_Linux" main.py
         
-        # 3. Créer le raccourci (Desktop)
-        echo "[Desktop Entry]\nName=SushiApp\nExec=SushiApp\nIcon=sushi\nType=Application\nCategories=Utility;" > AppDir/SushiApp.desktop
-        
-        # 4. Icône
-        wget -qO AppDir/sushi.png https://cdn-icons-png.flaticon.com/512/3143/3143644.png
-        
-        # 5. Télécharger l'outil AppImage pour ARM64
-        wget -qO appimagetool https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-aarch64.AppImage
-        chmod +x appimagetool
-        
-        # 6. Assemblage SANS FUSE (pour éviter l'erreur 8)
-        ./appimagetool --appimage-extract-and-run AppDir SushiApp-Linux-ARM64.AppImage
+        # 3. On ne s'embête plus avec l'AppImage pour l'instant, 
+        # on récupère directement l'exécutable Linux qui fonctionne partout !
+        cp dist/SushiApp_Linux .
 
     - name: Sauvegarder l'application
       uses: actions/upload-artifact@v4
       with:
-        name: SushiApp_Linux_RaspberryPi
-        path: SushiApp-Linux-ARM64.AppImage
+        name: SushiScan_Linux_Raspberry
+        path: SushiApp_Linux
