@@ -1,4 +1,4 @@
-name: Compilation Linux AppImage sur Raspberry Pi
+name: Compilation Linux AppImage
 
 on:
   push:
@@ -13,53 +13,33 @@ jobs:
     - name: Récupérer le code
       uses: actions/checkout@v4
 
-    - name: Préparer le système (Debian 12)
+    - name: Installation des outils
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-pip python3-tk wget binutils
+        # On force l'installation des paquets Python pour Debian 12
+        pip3 install --break-system-packages selenium pillow img2pdf pyinstaller
 
-    - name: Installer les bibliothèques Python
+    - name: Compiler et Créer AppImage
       run: |
-        pip3 install --upgrade pip
-        pip3 install -r requirements.txt
-        pip3 install pyinstaller
-
-    - name: Compiler avec PyInstaller
-      run: |
-        # On s'assure d'utiliser PyInstaller installé via pip3
         python3 -m PyInstaller --onefile --noconsole --name "SushiApp" main.py
-
-    - name: Fabriquer le format AppImage
-      run: |
-        # 1. Créer la structure
+        
+        # Structure AppImage rapide
         mkdir -p AppDir/usr/bin
         cp dist/SushiApp AppDir/usr/bin/
-        
-        # 2. Créer l'AppRun
         echo '#!/bin/sh' > AppDir/AppRun
-        echo 'HERE="$(dirname "$(readlink -f "${0}")")"' >> AppDir/AppRun
-        echo 'exec "${HERE}/usr/bin/SushiApp" "$@"' >> AppDir/AppRun
+        echo 'exec "${0%/*}/usr/bin/SushiApp" "$@"' >> AppDir/AppRun
         chmod +x AppDir/AppRun
         
-        # 3. Créer le fichier Desktop
-        echo '[Desktop Entry]' > AppDir/SushiApp.desktop
-        echo 'Name=SushiApp' >> AppDir/SushiApp.desktop
-        echo 'Exec=SushiApp' >> AppDir/SushiApp.desktop
-        echo 'Icon=sushi' >> AppDir/SushiApp.desktop
-        echo 'Type=Application' >> AppDir/SushiApp.desktop
-        echo 'Categories=Utility;' >> AppDir/SushiApp.desktop
-        
-        # 4. Icône par défaut
+        echo '[Desktop Entry]\nName=SushiApp\nExec=SushiApp\nIcon=sushi\nType=Application' > AppDir/SushiApp.desktop
         wget -qO AppDir/sushi.png https://cdn-icons-png.flaticon.com/512/3143/3143644.png
         
-        # 5. Outil AppImage pour ARM64 (Lien spécifique Raspberry Pi 5)
+        # Outil spécifique ARM64
         wget -qO appimagetool https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-aarch64.AppImage
         chmod +x appimagetool
-        
-        # 6. Assemblage final
         ./appimagetool --appimage-extract-and-run AppDir SushiApp-Linux-ARM64.AppImage
 
-    - name: Sauvegarder l'AppImage
+    - name: Sauvegarder
       uses: actions/upload-artifact@v4
       with:
         name: Application_Linux_ARM64
