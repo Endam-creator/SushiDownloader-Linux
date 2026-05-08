@@ -7,8 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04 # TRÈS IMPORTANT : Un vieux Linux pour une compatibilité maximale
-
+    runs-on: runs-on: self-hosted 
     steps:
     - name: Récupérer le code
       uses: actions/checkout@v4
