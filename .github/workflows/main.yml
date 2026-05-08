@@ -1,4 +1,4 @@
-name: Compilation Linux
+name: Compilation Linux Universelle
 
 on:
   push:
@@ -7,23 +7,30 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # On utilise la version 20.04 pour une compatibilité maximale (GLIBC plus ancienne)
+    runs-on: ubuntu-20.04
+    
     steps:
-      - name: Code
+      - name: Récupérer le code
         uses: actions/checkout@v4
 
-      - name: Setup
+      - name: Installation de Python et des outils
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Installation des dépendances
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-tk binutils
-          pip3 install --break-system-packages selenium pillow img2pdf pyinstaller
+          sudo apt-get install -y python3-tk binutils
+          pip install selenium pillow img2pdf pyinstaller
 
-      - name: Build
+      - name: Compilation
         run: |
-          python3 -m PyInstaller --onefile --noconsole --name "SushiApp_Linux" main.py
+          python -m PyInstaller --onefile --noconsole --name "SushiApp_Linux" main.py
 
-      - name: Save
+      - name: Sauvegarder
         uses: actions/upload-artifact@v4
         with:
-          name: SushiScan_Linux
+          name: SushiScan_Linux_Universel
           path: dist/SushiApp_Linux
