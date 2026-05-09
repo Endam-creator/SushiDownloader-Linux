@@ -1,37 +1,21 @@
-name: Compilation Linux Universelle Directe
+name: Build sur AlmaLinux local
 
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch:
 
 jobs:
   build:
-    # On repasse sur latest pour que ça ne reste pas en queued
-    runs-on: ubuntu-latest
-    
+    runs-on: self-hosted
     steps:
-      - name: Récupérer le code
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Installer les dépendances
+      - uses: actions/checkout@v4
+      - name: Build
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-tk binutils
-          pip install selenium pillow img2pdf pyinstaller
-
-      - name: Compilation Statique
-        run: |
-          # PyInstaller va essayer de lier le maximum de choses pour éviter l'erreur GLIBC
-          python -m PyInstaller --onefile --noconsole --name "SushiApp_Alma" main.py
-
-      - name: Sauvegarder
+          sudo dnf install -y python3-pip python3-tkinter
+          pip3 install --user selenium pillow img2pdf pyinstaller
+          python3 -m PyInstaller --onefile --noconsole main.py
+      - name: Save
         uses: actions/upload-artifact@v4
         with:
-          name: SushiScan_Alma
-          path: dist/SushiApp_Alma
+          name: SushiScan_Alma_Fix
+          path: dist/main
