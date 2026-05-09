@@ -1,4 +1,4 @@
-name: Compilation Linux Universelle
+name: Compilation Linux Universelle Directe
 
 on:
   push:
@@ -7,30 +7,31 @@ on:
 
 jobs:
   build:
-    # On utilise la version 20.04 pour une compatibilité maximale (GLIBC plus ancienne)
-    runs-on: ubuntu-20.04
+    # On repasse sur latest pour que ça ne reste pas en queued
+    runs-on: ubuntu-latest
     
     steps:
       - name: Récupérer le code
         uses: actions/checkout@v4
 
-      - name: Installation de Python et des outils
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Installation des dépendances
+      - name: Installer les dépendances
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-tk binutils
           pip install selenium pillow img2pdf pyinstaller
 
-      - name: Compilation
+      - name: Compilation Statique
         run: |
-          python -m PyInstaller --onefile --noconsole --name "SushiApp_Linux" main.py
+          # PyInstaller va essayer de lier le maximum de choses pour éviter l'erreur GLIBC
+          python -m PyInstaller --onefile --noconsole --name "SushiApp_Alma" main.py
 
       - name: Sauvegarder
         uses: actions/upload-artifact@v4
         with:
-          name: SushiScan_Linux_Universel
-          path: dist/SushiApp_Linux
+          name: SushiScan_Alma
+          path: dist/SushiApp_Alma
