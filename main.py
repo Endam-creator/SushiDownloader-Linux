@@ -107,55 +107,33 @@ class SushiApp(tk.Tk):
         self.log_text.see(tk.END)
 
     def lancer_chromium_automatique(self):
-        """Lance Chromium en nettoyant les verrous et en capturant les logs"""
-        self.log("🧹 Nettoyage des verrous de profil...")
+        """Lance Chromium via un appel Shell direct pour forcer l'ouverture"""
+        self.log("🧹 Nettoyage des processus et verrous...")
         
-        # 1. Supprimer le fichier de verrouillage de Chromium (cause n°1 de non-lancement)
+        # 1. On tue les restes de sessions précédentes pour libérer le port 9222
+        os.system("pkill -f chromium")
+        
+        # 2. On supprime le verrou de profil
         lock_file = os.path.join(self.profile_dir, "SingletonLock")
-        if os.path.islink(lock_file) or os.path.exists(lock_file):
-            try:
-                os.unlink(lock_file)
-                self.log("✅ SingletonLock supprimé.")
-            except:
-                pass
+        if os.path.exists(lock_file):
+            try: os.unlink(lock_file)
+            except: pass
 
-        # 2. Détection du binaire
+        # 3. On détermine le binaire
         browser_bin = shutil.which("chromium-browser") or shutil.which("chromium")
         if not browser_bin:
-            self.log("❌ Erreur : binaire 'chromium' introuvable.")
+            self.log("❌ Erreur : 'chromium' introuvable.")
             return False
 
-        # 3. Commande avec redirection des erreurs pour voir ce qui bloque
-        cmd = [
-            browser_bin,
-            "--remote-debugging-port=9222",
-            f"--user-data-dir={self.profile_dir}",
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-            "https://sushiscan.net"
-        ]
-
+        # 4. On prépare la commande Shell (avec le & à la fin pour ne pas bloquer)
+        # On force l'affichage sur l'écran :0
+        command = f'DISPLAY=:0 {browser_bin} --remote-debugging-port=9222 --user-data-dir="{self.profile_dir}" --no-sandbox --disable-dev-shm-usage --disable-gpu https://sushiscan.net > /dev/null 2>&1 &'
+        
         try:
-            # On utilise Popen pour ne pas bloquer l'UI
-            proc = subprocess.Popen(
-                cmd, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.STDOUT, 
-                text=True,
-                env=os.environ.copy()
-            )
-            
-            # On attend un peu et on vérifie si le processus est toujours vivant
-            time.sleep(3)
-            if proc.poll() is None:
-                self.log("🚀 Chromium semble lancé avec succès.")
-                return True
-            else:
-                # Si le processus est mort, on récupère l'erreur
-                out, _ = proc.communicate()
-                self.log(f"❌ Chromium a quitté immédiatement : {out[:200]}")
-                return False
+            self.log(f"🚀 Exécution : {browser_bin}...")
+            os.system(command)
+            time.sleep(6) # On laisse 6 secondes pour le Raspberry
+            return True
         except Exception as e:
             self.log(f"❌ Erreur système : {e}")
             return False
