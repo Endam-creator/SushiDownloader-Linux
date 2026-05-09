@@ -107,26 +107,37 @@ class SushiApp(tk.Tk):
         self.log_text.see(tk.END)
 
     def lancer_chromium_automatique(self):
-        """ Logique du launcher.sh intégrée """
-        self.log("🚀 Lancement de Chromium en mode Debug...")
-        browser_bin = shutil.which("chromium-browser") or shutil.which("chromium")
+        """Lance Chromium en forçant l'affichage sur le bureau Linux"""
+        self.log("🚀 Tentative de lancement forcé de Chromium...")
         
-        if not browser_bin: return False
+        browser_bin = shutil.which("chromium-browser") or shutil.which("chromium")
+        if not browser_bin:
+            self.log("❌ Erreur : binaire 'chromium' introuvable.")
+            return False
 
+        # On récupère l'environnement actuel pour le DISPLAY (écran :0)
+        env = os.environ.copy()
+        
         cmd = [
             browser_bin,
             "--remote-debugging-port=9222",
             f"--user-data-dir={self.profile_dir}",
             "--no-sandbox",
             "--disable-dev-shm-usage",
+            "--disable-gpu", # Aide sur Raspberry et vieux PC
             "https://sushiscan.net"
         ]
-        try:
-            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(5) # Laisse le temps au port 9222 de s'ouvrir
-            return True
-        except: return False
 
+        try:
+            # On utilise shell=False pour éviter les problèmes de sécurité
+            subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.log("⏳ Attente du chargement de Chromium (5s)...")
+            time.sleep(5)
+            return True
+        except Exception as e:
+            self.log(f"❌ Erreur système : {e}")
+            return False
+            
     def connect_driver(self):
         options = Options()
         options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
