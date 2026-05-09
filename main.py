@@ -160,7 +160,14 @@ class SushiApp(tk.Tk):
             self._reset_boutons()
             return
 
-        self.log("✅ Connexion établie. Traitement des scans...")
+        self.log("✅ Connecté. Ajustement de la vue...")
+        
+        # --- FIX POUR LES IMAGES COUPÉES ---
+        # On force une fenêtre géante pour être sûr que tout le scan rentre
+        self.driver.set_window_size(1600, 2500) 
+        # On dézoome un peu la page au cas où le scan est ultra large
+        self.driver.execute_script("document.body.style.zoom='0.8'")
+        
         os.makedirs("Downloads", exist_ok=True)
         image_paths = []
 
@@ -169,50 +176,55 @@ class SushiApp(tk.Tk):
             self.lbl_info.config(text=f"Progression : {i}/{max_pages}")
             
             try:
-                self.driver.execute_script("window.scrollTo(0,0);")
-                WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "div#readerarea img")))
+                # On attend que l'image soit bien là
+                WebDriverWait(self.driver, 15).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div#readerarea img"))
+                )
+                
+                # Petit scroll pour forcer le chargement complet (Lazy Loading)
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+                time.sleep(0.5)
+                self.driver.execute_script("window.scrollTo(0, 0);")
+                time.sleep(1)
+
                 target_img = self.driver.find_element(By.CSS_SELECTOR, "div#readerarea img")
                 
+                # Screenshot de la zone complète
                 png_data = self.driver.get_screenshot_as_png()
                 full_img = Image.open(io.BytesIO(png_data)).convert("RGB")
                 
-                loc, size = target_img.location, target_img.size
-                left, top = int(loc["x"]), int(loc["y"])
-                right, bottom = left + int(size["width"]), top + int(size["height"])
+                # Récupération des coordonnées exactes
+                loc = target_img.location
+                size = target_img.size
                 
-                final_img = full_img.crop((left, top, right, bottom))
+                # Conversion en entiers pour le crop
+                left = int(loc["x"])
+                top = int(loc["y"])
+                right = left + int(size["width"])
+                bottom = top + int(size["height"])
+                
+                # Sécurité : si l'image dépasse du screenshot, on retaille le screenshot
+                final_img = full_img.crop((left, top, min(right, full_img.width), min(bottom, full_img.height)))
                 final_img = self._ajouter_filigrane(final_img)
                 
                 fname = f"Downloads/page_{i:03d}.jpg"
-                final_img.save(fname, quality=90)
+                final_img.save(fname, quality=95)
                 image_paths.append(fname)
                 self.log(f"Page {i} capturée.")
 
                 if i < max_pages:
-                    try:
-                        next_btn = self.driver.find_element(By.CSS_SELECTOR, "div.nextprev a.ch-next-btn")
-                        self.driver.execute_script("arguments[0].click();", next_btn)
-                        time.sleep(2.5) # Un peu de délai pour le rendu
-                    except:
-                        self.log("Fin de chapitre détectée prématurément.")
-                        break
+                    next_btn = self.driver.find_element(By.CSS_SELECTOR, "div.nextprev a.ch-next-btn")
+                    self.driver.execute_script("arguments[0].click();", next_btn)
+                    # On attend que l'URL change ou que l'image soit remplacée
+                    time.sleep(3) 
+
             except Exception as e:
-                self.log(f"Erreur sur la page {i}: {e}")
+                self.log(f"⚠️ Erreur page {i}: {e}")
                 break
 
         if image_paths and not self._cancel_event.is_set():
             self._creer_pdf(image_paths)
         self._reset_boutons()
-
-    def _creer_pdf(self, image_paths):
-        self.lbl_info.config(text="Génération du PDF...")
-        pdf_path = f"Downloads/SushiScan_{int(time.time())}.pdf"
-        try:
-            with open(pdf_path, "wb") as f:
-                f.write(img2pdf.convert(image_paths))
-            self.log(f"🎉 PDF terminé : {pdf_path}")
-            for p in image_paths: os.remove(p)
-        except Exception as e: self.log(f"❌ Erreur assemblage PDF: {e}")
 
     def _on_start(self):
         self._cancel_event.clear()
