@@ -148,6 +148,7 @@ class SushiApp(tk.Tk):
         except: return original_image
 
     def demarrer(self):
+        """Orchestre le téléchargement, la capture précise et la création du PDF."""
         val = self.entry_pages.get()
         if not val.isdigit():
             messagebox.showerror("Erreur", "Nombre de pages invalide")
@@ -160,72 +161,97 @@ class SushiApp(tk.Tk):
             self._reset_boutons()
             return
 
-        self.log("✅ Connecté. Ajustement de la vue...")
+        self.log("✅ Connecté à Chromium. Ajustement du format...")
         
-        # --- FIX POUR LES IMAGES COUPÉES ---
-        # On force une fenêtre géante pour être sûr que tout le scan rentre
-        self.driver.set_window_size(1600, 2500) 
-        # On dézoome un peu la page au cas où le scan est ultra large
-        self.driver.execute_script("document.body.style.zoom='0.8'")
+        # On force une grande fenêtre pour éviter que le scan ne soit coupé
+        self.driver.set_window_size(1600, 2600)
         
         os.makedirs("Downloads", exist_ok=True)
         image_paths = []
 
         for i in range(1, max_pages + 1):
-            if self._cancel_event.is_set(): break
+            if self._cancel_event.is_set():
+                self.log("⛔ Annulation demandée.")
+                break
+
             self.lbl_info.config(text=f"Progression : {i}/{max_pages}")
             
             try:
-                # On attend que l'image soit bien là
+                # 1. Attente que l'image soit présente dans le DOM
                 WebDriverWait(self.driver, 15).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "div#readerarea img"))
                 )
                 
-                # Petit scroll pour forcer le chargement complet (Lazy Loading)
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+                # 2. Forcer le chargement de l'image (Lazy Load Fix)
+                # On descend un peu puis on remonte pour "réveiller" le scan
+                self.driver.execute_script("window.scrollTo(0, 800);")
                 time.sleep(0.5)
                 self.driver.execute_script("window.scrollTo(0, 0);")
-                time.sleep(1)
+                time.sleep(1.2) # Temps pour que l'image s'affiche proprement
 
+                # 3. Récupérer l'élément et ses coordonnées RÉELLES via JS
                 target_img = self.driver.find_element(By.CSS_SELECTOR, "div#readerarea img")
                 
-                # Screenshot de la zone complète
+                # Ce script calcule la position exacte par rapport au coin haut-gauche du document
+                rect = self.driver.execute_script("""
+                    var rect = arguments[0].getBoundingClientRect();
+                    return {
+                        left: rect.left + window.pageXOffset,
+                        top: rect.top + window.pageYOffset,
+                        width: rect.width,
+                        height: rect.height
+                    };
+                """, target_img)
+
+                # 4. Capture d'écran brute
                 png_data = self.driver.get_screenshot_as_png()
                 full_img = Image.open(io.BytesIO(png_data)).convert("RGB")
-                
-                # Récupération des coordonnées exactes
-                loc = target_img.location
-                size = target_img.size
-                
-                # Conversion en entiers pour le crop
-                left = int(loc["x"])
-                top = int(loc["y"])
-                right = left + int(size["width"])
-                bottom = top + int(size["height"])
-                
-                # Sécurité : si l'image dépasse du screenshot, on retaille le screenshot
-                final_img = full_img.crop((left, top, min(right, full_img.width), min(bottom, full_img.height)))
-                final_img = self._ajouter_filigrane(final_img)
-                
-                fname = f"Downloads/page_{i:03d}.jpg"
-                final_img.save(fname, quality=95)
-                image_paths.append(fname)
-                self.log(f"Page {i} capturée.")
 
+                # 5. Calcul du découpage (Crop) pour enlever le noir
+                left = int(rect['left'])
+                top = int(rect['top'])
+                right = left + int(rect['width'])
+                bottom = top + int(rect['height'])
+
+                # Sécurité : on s'assure de ne pas dépasser les limites de la capture
+                final_img = full_img.crop((
+                    max(0, left), 
+                    max(0, top), 
+                    min(right, full_img.width), 
+                    min(bottom, full_img.height)
+                ))
+
+                # 6. Ajout du filigrane et sauvegarde
+                final_img = self._ajouter_filigrane(final_img)
+                fname = f"Downloads/page_{i:03d}.jpg"
+                
+                # Sauvegarde en haute qualité (95) sans sous-échantillonnage pour un texte net
+                final_img.save(fname, quality=95, subsampling=0)
+                image_paths.append(fname)
+                self.log(f"✅ Page {i} capturée au bon format.")
+
+                # 7. Navigation vers la page suivante
                 if i < max_pages:
-                    next_btn = self.driver.find_element(By.CSS_SELECTOR, "div.nextprev a.ch-next-btn")
-                    self.driver.execute_script("arguments[0].click();", next_btn)
-                    # On attend que l'URL change ou que l'image soit remplacée
-                    time.sleep(3) 
+                    try:
+                        # On cherche le bouton "Suivant" spécifique à SushiScan
+                        next_btn = self.driver.find_element(By.CSS_SELECTOR, "div.nextprev a.ch-next-btn")
+                        self.driver.execute_script("arguments[0].click();", next_btn)
+                        # Attente de chargement de la nouvelle page
+                        time.sleep(3) 
+                    except Exception:
+                        self.log("⚠️ Bouton Suivant introuvable ou fin de chapitre.")
+                        break
 
             except Exception as e:
-                self.log(f"⚠️ Erreur page {i}: {e}")
+                self.log(f"❌ Erreur critique page {i}: {e}")
                 break
 
+        # 8. Assemblage final en PDF
         if image_paths and not self._cancel_event.is_set():
             self._creer_pdf(image_paths)
+        
         self._reset_boutons()
-
+    
     def _on_start(self):
         self._cancel_event.clear()
         self.btn_start.config(state="disabled")
