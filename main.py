@@ -121,7 +121,8 @@ class SushiApp(tk.Tk):
             return False
 
     def connect_driver(self):
-        """ Connexion Selenium avec redirection forcée si sur Google """
+        """Se connecte uniquement à une instance existante sur le port 9222"""
+        self.log("🔗 Recherche d'une session Chromium sur le port 9222...")
         options = Options()
         options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
         options.add_argument("--no-sandbox")
@@ -129,19 +130,12 @@ class SushiApp(tk.Tk):
 
         try:
             self.driver = webdriver.Chrome(service=service, options=options)
-            # Correction point 2 : Forcer SushiScan si Chromium ouvre Google
-            if "google" in self.driver.current_url.lower():
-                self.log("🌐 Redirection vers SushiScan...")
-                self.driver.get("https://sushiscan.net")
+            self.log("✅ Connexion réussie ! Vous pouvez démarrer.")
             return self.driver
         except:
-            if self.lancer_chromium_automatique():
-                try:
-                    self.driver = webdriver.Chrome(service=service, options=options)
-                    self.driver.get("https://sushiscan.net")
-                    return self.driver
-                except: pass
-            messagebox.showerror("Erreur", "Impossible d'initier Selenium sur le port 9222.")
+            self.log("❌ Chromium n'est pas détecté.")
+            messagebox.showerror("Erreur", 
+                "Veuillez lancer Chromium avec votre script launcher.sh avant de cliquer sur Démarrer.")
             return None
 
     def _ajouter_filigrane(self, original_image):
