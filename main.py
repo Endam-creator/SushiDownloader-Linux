@@ -107,33 +107,55 @@ class SushiApp(tk.Tk):
         self.log_text.see(tk.END)
 
     def lancer_chromium_automatique(self):
-        """Lance Chromium en forçant l'affichage sur le bureau Linux"""
-        self.log("🚀 Tentative de lancement forcé de Chromium...")
+        """Lance Chromium en nettoyant les verrous et en capturant les logs"""
+        self.log("🧹 Nettoyage des verrous de profil...")
         
+        # 1. Supprimer le fichier de verrouillage de Chromium (cause n°1 de non-lancement)
+        lock_file = os.path.join(self.profile_dir, "SingletonLock")
+        if os.path.islink(lock_file) or os.path.exists(lock_file):
+            try:
+                os.unlink(lock_file)
+                self.log("✅ SingletonLock supprimé.")
+            except:
+                pass
+
+        # 2. Détection du binaire
         browser_bin = shutil.which("chromium-browser") or shutil.which("chromium")
         if not browser_bin:
             self.log("❌ Erreur : binaire 'chromium' introuvable.")
             return False
 
-        # On récupère l'environnement actuel pour le DISPLAY (écran :0)
-        env = os.environ.copy()
-        
+        # 3. Commande avec redirection des erreurs pour voir ce qui bloque
         cmd = [
             browser_bin,
             "--remote-debugging-port=9222",
             f"--user-data-dir={self.profile_dir}",
             "--no-sandbox",
             "--disable-dev-shm-usage",
-            "--disable-gpu", # Aide sur Raspberry et vieux PC
+            "--disable-gpu",
             "https://sushiscan.net"
         ]
 
         try:
-            # On utilise shell=False pour éviter les problèmes de sécurité
-            subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            self.log("⏳ Attente du chargement de Chromium (5s)...")
-            time.sleep(5)
-            return True
+            # On utilise Popen pour ne pas bloquer l'UI
+            proc = subprocess.Popen(
+                cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True,
+                env=os.environ.copy()
+            )
+            
+            # On attend un peu et on vérifie si le processus est toujours vivant
+            time.sleep(3)
+            if proc.poll() is None:
+                self.log("🚀 Chromium semble lancé avec succès.")
+                return True
+            else:
+                # Si le processus est mort, on récupère l'erreur
+                out, _ = proc.communicate()
+                self.log(f"❌ Chromium a quitté immédiatement : {out[:200]}")
+                return False
         except Exception as e:
             self.log(f"❌ Erreur système : {e}")
             return False
