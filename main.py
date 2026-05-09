@@ -32,7 +32,8 @@ class SushiApp(tk.Tk):
         self.geometry("700x800")
         self.driver = None
         self._cancel_event = threading.Event()
-        # Dossier de profil isolé pour ne pas polluer ton navigateur principal
+        self.image_paths = []
+        # Dossier de profil isolé
         self.profile_dir = os.path.expanduser("~/SushiProfile")
         self._setup_ui()
         
@@ -91,11 +92,10 @@ class SushiApp(tk.Tk):
         self.log_text.see(tk.END)
 
     def lancer_chromium_automatique(self):
-        """ Nettoie les verrous et lance Chromium en mode Debug """
+        """ Nettoie les verrous et lance Chromium en mode Debug (Bypass AlmaLinux) """
         self.log("🧹 Nettoyage des anciennes sessions...")
         os.system("pkill -f chromium")
         
-        # Suppression du verrou Singleton de Chromium (très important sur Linux)
         lock_file = os.path.join(self.profile_dir, "SingletonLock")
         if os.path.exists(lock_file):
             try: os.unlink(lock_file)
@@ -105,8 +105,8 @@ class SushiApp(tk.Tk):
         if not browser_bin: return False
 
         self.log(f"🚀 Lancement de {browser_bin}...")
-        # Commande optimisée pour AlmaLinux avec DISPLAY force
-        cmd = f'DISPLAY=:0 {browser_bin} --remote-debugging-port=9222 --user-data-dir="{self.profile_dir}" --no-sandbox --disable-dev-shm-usage --disable-gpu https://sushiscan.net > /dev/null 2>&1 &'
+        # Lancement avec URL forcée et bypass de sécurité via os.system
+        cmd = f'{browser_bin} --remote-debugging-port=9222 --user-data-dir="{self.profile_dir}" --no-sandbox --disable-dev-shm-usage --start-maximized https://sushiscan.net &'
         
         try:
             os.system(cmd)
@@ -115,21 +115,25 @@ class SushiApp(tk.Tk):
         except: return False
 
     def connect_driver(self):
-        """ Connexion Selenium au port 9222 """
+        """ Connexion Selenium avec redirection forcée si sur Google """
         options = Options()
         options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
         options.add_argument("--no-sandbox")
-        
-        # On utilise ton chemin /usr/bin/chromedriver confirmé
         service = Service(executable_path="/usr/bin/chromedriver")
 
         try:
             self.driver = webdriver.Chrome(service=service, options=options)
+            # Correction point 2 : Forcer SushiScan si Chromium ouvre Google
+            if "google" in self.driver.current_url.lower():
+                self.log("🌐 Redirection vers SushiScan...")
+                self.driver.get("https://sushiscan.net")
             return self.driver
         except:
             if self.lancer_chromium_automatique():
                 try:
-                    return webdriver.Chrome(service=service, options=options)
+                    self.driver = webdriver.Chrome(service=service, options=options)
+                    self.driver.get("https://sushiscan.net")
+                    return self.driver
                 except: pass
             messagebox.showerror("Erreur", "Impossible d'initier Selenium sur le port 9222.")
             return None
@@ -148,7 +152,7 @@ class SushiApp(tk.Tk):
         except: return original_image
 
     def demarrer(self):
-        """Orchestre le téléchargement, la capture précise et la création du PDF."""
+        """Orchestre le téléchargement et la capture précise."""
         val = self.entry_pages.get()
         if not val.isdigit():
             messagebox.showerror("Erreur", "Nombre de pages invalide")
@@ -161,13 +165,11 @@ class SushiApp(tk.Tk):
             self._reset_boutons()
             return
 
-        self.log("✅ Connecté à Chromium. Ajustement du format...")
-        
-        # On force une grande fenêtre pour éviter que le scan ne soit coupé
+        self.log("✅ Connecté. Ajustement du format...")
         self.driver.set_window_size(1600, 2600)
         
         os.makedirs("Downloads", exist_ok=True)
-        image_paths = []
+        self.image_paths = [] # Correction point 1 : On utilise self pour la persistance
 
         for i in range(1, max_pages + 1):
             if self._cancel_event.is_set():
@@ -177,22 +179,19 @@ class SushiApp(tk.Tk):
             self.lbl_info.config(text=f"Progression : {i}/{max_pages}")
             
             try:
-                # 1. Attente que l'image soit présente dans le DOM
                 WebDriverWait(self.driver, 15).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "div#readerarea img"))
                 )
                 
-                # 2. Forcer le chargement de l'image (Lazy Load Fix)
-                # On descend un peu puis on remonte pour "réveiller" le scan
+                # Fix Lazy Load
                 self.driver.execute_script("window.scrollTo(0, 800);")
                 time.sleep(0.5)
                 self.driver.execute_script("window.scrollTo(0, 0);")
-                time.sleep(1.2) # Temps pour que l'image s'affiche proprement
+                time.sleep(1.5)
 
-                # 3. Récupérer l'élément et ses coordonnées RÉELLES via JS
                 target_img = self.driver.find_element(By.CSS_SELECTOR, "div#readerarea img")
                 
-                # Ce script calcule la position exacte par rapport au coin haut-gauche du document
+                # Calcul précis du format pour éviter les bandes noires
                 rect = self.driver.execute_script("""
                     var rect = arguments[0].getBoundingClientRect();
                     return {
@@ -203,17 +202,12 @@ class SushiApp(tk.Tk):
                     };
                 """, target_img)
 
-                # 4. Capture d'écran brute
                 png_data = self.driver.get_screenshot_as_png()
                 full_img = Image.open(io.BytesIO(png_data)).convert("RGB")
 
-                # 5. Calcul du découpage (Crop) pour enlever le noir
-                left = int(rect['left'])
-                top = int(rect['top'])
-                right = left + int(rect['width'])
-                bottom = top + int(rect['height'])
+                left, top = int(rect['left']), int(rect['top'])
+                right, bottom = left + int(rect['width']), top + int(rect['height'])
 
-                # Sécurité : on s'assure de ne pas dépasser les limites de la capture
                 final_img = full_img.crop((
                     max(0, left), 
                     max(0, top), 
@@ -221,37 +215,49 @@ class SushiApp(tk.Tk):
                     min(bottom, full_img.height)
                 ))
 
-                # 6. Ajout du filigrane et sauvegarde
                 final_img = self._ajouter_filigrane(final_img)
-                fname = f"Downloads/page_{i:03d}.jpg"
-                
-                # Sauvegarde en haute qualité (95) sans sous-échantillonnage pour un texte net
+                # Utilisation de chemins absolus pour éviter les pertes PyInstaller
+                fname = os.path.abspath(f"Downloads/page_{i:03d}.jpg")
                 final_img.save(fname, quality=95, subsampling=0)
-                image_paths.append(fname)
-                self.log(f"✅ Page {i} capturée au bon format.")
+                
+                self.image_paths.append(fname)
+                self.log(f"✅ Page {i} capturée.")
 
-                # 7. Navigation vers la page suivante
                 if i < max_pages:
                     try:
-                        # On cherche le bouton "Suivant" spécifique à SushiScan
                         next_btn = self.driver.find_element(By.CSS_SELECTOR, "div.nextprev a.ch-next-btn")
                         self.driver.execute_script("arguments[0].click();", next_btn)
-                        # Attente de chargement de la nouvelle page
                         time.sleep(3) 
-                    except Exception:
-                        self.log("⚠️ Bouton Suivant introuvable ou fin de chapitre.")
+                    except:
+                        self.log("Fin de chapitre détectée.")
                         break
 
             except Exception as e:
-                self.log(f"❌ Erreur critique page {i}: {e}")
+                self.log(f"❌ Erreur page {i}: {e}")
                 break
 
-        # 8. Assemblage final en PDF
-        if image_paths and not self._cancel_event.is_set():
-            self._creer_pdf(image_paths)
+        # Correction point 1 : Appel de la création du PDF
+        if self.image_paths and not self._cancel_event.is_set():
+            self.log(f"📦 Création du PDF avec {len(self.image_paths)} images...")
+            self._creer_pdf(self.image_paths)
+        elif self.image_paths:
+             self.log("⚠️ Images conservées dans /Downloads (Annulation).")
         
         self._reset_boutons()
-    
+
+    def _creer_pdf(self, image_paths):
+        self.lbl_info.config(text="Génération du PDF...")
+        pdf_path = f"Downloads/SushiScan_{int(time.time())}.pdf"
+        try:
+            with open(pdf_path, "wb") as f:
+                f.write(img2pdf.convert(image_paths))
+            self.log(f"🎉 PDF créé avec succès : {pdf_path}")
+            # Nettoyage
+            for p in image_paths:
+                if os.path.exists(p): os.remove(p)
+        except Exception as e:
+            self.log(f"❌ Erreur assemblage PDF: {e}")
+
     def _on_start(self):
         self._cancel_event.clear()
         self.btn_start.config(state="disabled")
