@@ -107,35 +107,44 @@ class SushiApp(tk.Tk):
         self.log_text.see(tk.END)
 
     def lancer_chromium_automatique(self):
-        """Lance Chromium via un appel Shell direct pour forcer l'ouverture"""
-        self.log("🧹 Nettoyage des processus et verrous...")
+        """Lance Chromium en redirigeant les erreurs vers un fichier log"""
+        self.log("🔍 Diagnostic profond en cours...")
         
-        # 1. On tue les restes de sessions précédentes pour libérer le port 9222
+        # 1. Nettoyage
         os.system("pkill -f chromium")
-        
-        # 2. On supprime le verrou de profil
         lock_file = os.path.join(self.profile_dir, "SingletonLock")
         if os.path.exists(lock_file):
             try: os.unlink(lock_file)
             except: pass
 
-        # 3. On détermine le binaire
+        # 2. Binaire
         browser_bin = shutil.which("chromium-browser") or shutil.which("chromium")
         if not browser_bin:
-            self.log("❌ Erreur : 'chromium' introuvable.")
+            self.log("❌ Erreur : binaire introuvable.")
             return False
 
-        # 4. On prépare la commande Shell (avec le & à la fin pour ne pas bloquer)
-        # On force l'affichage sur l'écran :0
-        command = f'DISPLAY=:0 {browser_bin} --remote-debugging-port=9222 --user-data-dir="{self.profile_dir}" --no-sandbox --disable-dev-shm-usage --disable-gpu https://sushiscan.net > /dev/null 2>&1 &'
+        # 3. Commande avec LOG D'ERREUR sur le bureau
+        log_path = os.path.expanduser("~/Desktop/chromium_debug.log")
+        command = f'DISPLAY=:0 {browser_bin} --remote-debugging-port=9222 --user-data-dir="{self.profile_dir}" --no-sandbox --disable-dev-shm-usage --disable-gpu > {log_path} 2>&1 &'
         
         try:
-            self.log(f"🚀 Exécution : {browser_bin}...")
+            self.log(f"🚀 Lancement de {browser_bin}...")
             os.system(command)
-            time.sleep(6) # On laisse 6 secondes pour le Raspberry
+            time.sleep(5)
+            
+            # On vérifie si le fichier log contient des erreurs
+            if os.path.exists(log_path):
+                with open(log_path, 'r') as f:
+                    errors = f.read()
+                    if errors:
+                        self.log("📋 Log détecté. Analyse du contenu...")
+                        # Si on voit une erreur de lib, on l'affiche
+                        if "cannot open shared object file" in errors:
+                            self.log("❌ Il manque une bibliothèque système !")
+            
             return True
         except Exception as e:
-            self.log(f"❌ Erreur système : {e}")
+            self.log(f"❌ Erreur : {e}")
             return False
             
     def connect_driver(self):
