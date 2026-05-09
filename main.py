@@ -18,7 +18,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 def resource_path(relative_path):
-    """ Gestion des chemins pour PyInstaller """
+    """ Gestion des chemins pour PyInstaller (icônes, images, etc.) """
     try:
         base_path = sys._MEIPASS
     except Exception:
@@ -32,25 +32,20 @@ class SushiApp(tk.Tk):
         self.geometry("700x800")
         self.driver = None
         self._cancel_event = threading.Event()
+        # Dossier de profil isolé pour ne pas polluer ton navigateur principal
         self.profile_dir = os.path.expanduser("~/SushiProfile")
         self._setup_ui()
         
-        # Vérification des pré-requis au lancement
+        # Petit check au démarrage
         self.after(1000, self._check_dependencies)
 
     def _check_dependencies(self):
-        """ Vérifie si Chromium et le Driver sont présents sur le système Linux """
-        deps = {
-            "chromium": ["/usr/bin/chromium-browser", "/usr/bin/chromium"],
-            "chromedriver": ["/usr/bin/chromedriver", "/usr/lib/chromium-browser/chromedriver"]
-        }
-        missing = []
-        for name, paths in deps.items():
-            if not any(os.path.exists(p) for p in paths) and shutil.which(name) is None:
-                missing.append(name)
+        """ Vérifie si les outils système sont là """
+        browser = shutil.which("chromium-browser") or shutil.which("chromium")
+        driver = shutil.which("chromedriver")
         
-        if missing:
-            msg = "⚠️ Dépendances manquantes !\n\nsudo apt install chromium-browser chromium-chromedriver"
+        if not browser or not driver:
+            msg = "⚠️ Dépendances manquantes !\n\nsudo dnf install chromium chromedriver"
             messagebox.showwarning("Logiciel Manquant", msg)
 
     def _setup_ui(self):
@@ -59,8 +54,8 @@ class SushiApp(tk.Tk):
 
         lbl_instr = tk.Label(
             frame_top,
-            text="L'application lancera Chromium automatiquement.\nAssurez-vous d'être sur la Page 1 du chapitre.",
-            fg="red", justify=tk.LEFT
+            text="L'application gère le lancement de Chromium.\nPlacez-vous sur le premier scan du chapitre une fois ouvert.",
+            fg="#d32f2f", justify=tk.LEFT
         )
         lbl_instr.pack(side=tk.TOP, pady=5)
 
@@ -91,69 +86,42 @@ class SushiApp(tk.Tk):
         self.log_text = tk.Text(self, height=15, width=80)
         self.log_text.pack(padx=10, pady=5)
 
-    def _on_start(self):
-        self._cancel_event.clear()
-        self.btn_start.config(state="disabled")
-        self.btn_cancel.config(state="normal")
-        threading.Thread(target=self.demarrer, daemon=True).start()
-
-    def _on_cancel(self):
-        self._cancel_event.set()
-        self.btn_cancel.config(state="disabled")
-        self.lbl_info.config(text="Annulation en cours...")
-
     def log(self, message):
         self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
 
     def lancer_chromium_automatique(self):
-        """Lance Chromium en redirigeant les erreurs vers un fichier log"""
-        self.log("🔍 Diagnostic profond en cours...")
-        
-        # 1. Nettoyage
+        """ Nettoie les verrous et lance Chromium en mode Debug """
+        self.log("🧹 Nettoyage des anciennes sessions...")
         os.system("pkill -f chromium")
+        
+        # Suppression du verrou Singleton de Chromium (très important sur Linux)
         lock_file = os.path.join(self.profile_dir, "SingletonLock")
         if os.path.exists(lock_file):
             try: os.unlink(lock_file)
             except: pass
 
-        # 2. Binaire
         browser_bin = shutil.which("chromium-browser") or shutil.which("chromium")
-        if not browser_bin:
-            self.log("❌ Erreur : binaire introuvable.")
-            return False
+        if not browser_bin: return False
 
-        # 3. Commande avec LOG D'ERREUR sur le bureau
-        log_path = os.path.expanduser("~/Desktop/chromium_debug.log")
-        command = f'DISPLAY=:0 {browser_bin} --remote-debugging-port=9222 --user-data-dir="{self.profile_dir}" --no-sandbox --disable-dev-shm-usage --disable-gpu > {log_path} 2>&1 &'
+        self.log(f"🚀 Lancement de {browser_bin}...")
+        # Commande optimisée pour AlmaLinux avec DISPLAY force
+        cmd = f'DISPLAY=:0 {browser_bin} --remote-debugging-port=9222 --user-data-dir="{self.profile_dir}" --no-sandbox --disable-dev-shm-usage --disable-gpu https://sushiscan.net > /dev/null 2>&1 &'
         
         try:
-            self.log(f"🚀 Lancement de {browser_bin}...")
-            os.system(command)
-            time.sleep(5)
-            
-            # On vérifie si le fichier log contient des erreurs
-            if os.path.exists(log_path):
-                with open(log_path, 'r') as f:
-                    errors = f.read()
-                    if errors:
-                        self.log("📋 Log détecté. Analyse du contenu...")
-                        # Si on voit une erreur de lib, on l'affiche
-                        if "cannot open shared object file" in errors:
-                            self.log("❌ Il manque une bibliothèque système !")
-            
+            os.system(cmd)
+            time.sleep(5) 
             return True
-        except Exception as e:
-            self.log(f"❌ Erreur : {e}")
-            return False
-            
+        except: return False
+
     def connect_driver(self):
+        """ Connexion Selenium au port 9222 """
         options = Options()
         options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
         options.add_argument("--no-sandbox")
         
-        driver_path = shutil.which("chromedriver") or "/usr/bin/chromedriver"
-        service = Service(executable_path=driver_path)
+        # On utilise ton chemin /usr/bin/chromedriver confirmé
+        service = Service(executable_path="/usr/bin/chromedriver")
 
         try:
             self.driver = webdriver.Chrome(service=service, options=options)
@@ -163,7 +131,7 @@ class SushiApp(tk.Tk):
                 try:
                     return webdriver.Chrome(service=service, options=options)
                 except: pass
-            messagebox.showerror("Erreur", "Impossible de piloter Chromium.")
+            messagebox.showerror("Erreur", "Impossible d'initier Selenium sur le port 9222.")
             return None
 
     def _ajouter_filigrane(self, original_image):
@@ -180,25 +148,25 @@ class SushiApp(tk.Tk):
         except: return original_image
 
     def demarrer(self):
-        max_pages_str = self.entry_pages.get()
-        if not max_pages_str.isdigit():
+        val = self.entry_pages.get()
+        if not val.isdigit():
             messagebox.showerror("Erreur", "Nombre de pages invalide")
             self._reset_boutons()
             return
             
-        max_pages = int(max_pages_str)
+        max_pages = int(val)
         self.driver = self.connect_driver()
         if not self.driver:
             self._reset_boutons()
             return
 
-        self.log("🔗 Connecté à Chromium. Début du téléchargement...")
+        self.log("✅ Connexion établie. Traitement des scans...")
         os.makedirs("Downloads", exist_ok=True)
         image_paths = []
 
         for i in range(1, max_pages + 1):
             if self._cancel_event.is_set(): break
-            self.lbl_info.config(text=f"Page {i}/{max_pages}")
+            self.lbl_info.config(text=f"Progression : {i}/{max_pages}")
             
             try:
                 self.driver.execute_script("window.scrollTo(0,0);")
@@ -218,28 +186,43 @@ class SushiApp(tk.Tk):
                 fname = f"Downloads/page_{i:03d}.jpg"
                 final_img.save(fname, quality=90)
                 image_paths.append(fname)
-                self.log(f"✅ Page {i} OK")
+                self.log(f"Page {i} capturée.")
 
                 if i < max_pages:
-                    next_btn = self.driver.find_element(By.CSS_SELECTOR, "div.nextprev a.ch-next-btn")
-                    self.driver.execute_script("arguments[0].click();", next_btn)
-                    time.sleep(2)
+                    try:
+                        next_btn = self.driver.find_element(By.CSS_SELECTOR, "div.nextprev a.ch-next-btn")
+                        self.driver.execute_script("arguments[0].click();", next_btn)
+                        time.sleep(2.5) # Un peu de délai pour le rendu
+                    except:
+                        self.log("Fin de chapitre détectée prématurément.")
+                        break
             except Exception as e:
-                self.log(f"⚠️ Erreur page {i}: {e}")
+                self.log(f"Erreur sur la page {i}: {e}")
                 break
 
         if image_paths and not self._cancel_event.is_set():
-            self._creer_pdf(image_paths, "SushiScan_Download")
+            self._creer_pdf(image_paths)
         self._reset_boutons()
 
-    def _creer_pdf(self, image_paths, title):
-        pdf_path = f"Downloads/{title}_{int(time.time())}.pdf"
+    def _creer_pdf(self, image_paths):
+        self.lbl_info.config(text="Génération du PDF...")
+        pdf_path = f"Downloads/SushiScan_{int(time.time())}.pdf"
         try:
             with open(pdf_path, "wb") as f:
                 f.write(img2pdf.convert(image_paths))
-            self.log(f"🎉 PDF créé : {pdf_path}")
+            self.log(f"🎉 PDF terminé : {pdf_path}")
             for p in image_paths: os.remove(p)
-        except Exception as e: self.log(f"❌ Erreur PDF: {e}")
+        except Exception as e: self.log(f"❌ Erreur assemblage PDF: {e}")
+
+    def _on_start(self):
+        self._cancel_event.clear()
+        self.btn_start.config(state="disabled")
+        self.btn_cancel.config(state="normal")
+        threading.Thread(target=self.demarrer, daemon=True).start()
+
+    def _on_cancel(self):
+        self._cancel_event.set()
+        self.btn_cancel.config(state="disabled")
 
     def _reset_boutons(self):
         self.btn_start.config(state="normal")
