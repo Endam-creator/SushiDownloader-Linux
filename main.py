@@ -92,8 +92,8 @@ class SushiApp(tk.Tk):
         self.log_text.see(tk.END)
 
     def lancer_chromium_automatique(self):
-        """ Nettoie les verrous et lance Chromium en mode Debug (Bypass AlmaLinux) """
-        self.log("🧹 Nettoyage des anciennes sessions...")
+        """ Nettoie les verrous et lance Chromium via un Shell Bash explicite """
+        self.log("🧹 Nettoyage des sessions...")
         os.system("pkill -f chromium")
         
         lock_file = os.path.join(self.profile_dir, "SingletonLock")
@@ -104,15 +104,21 @@ class SushiApp(tk.Tk):
         browser_bin = shutil.which("chromium-browser") or shutil.which("chromium")
         if not browser_bin: return False
 
-        self.log(f"🚀 Lancement de {browser_bin}...")
-        # Lancement avec URL forcée et bypass de sécurité via os.system
-        cmd = f'{browser_bin} --remote-debugging-port=9222 --user-data-dir="{self.profile_dir}" --no-sandbox --disable-dev-shm-usage --start-maximized https://sushiscan.net &'
+        self.log(f"🚀 Tentative de lancement via Bash : {browser_bin}")
+        
+        # On enveloppe la commande dans 'bash -c' pour garantir l'exécution du '&'
+        inner_cmd = f'{browser_bin} --remote-debugging-port=9222 --user-data-dir="{self.profile_dir}" --no-sandbox --disable-dev-shm-usage --start-maximized https://sushiscan.net'
+        full_cmd = f"/bin/bash -c '{inner_cmd} &' &"
         
         try:
-            os.system(cmd)
-            time.sleep(5) 
+            # On utilise subprocess.Popen pour détacher complètement le processus du binaire Python
+            subprocess.Popen(full_cmd, shell=True, preexec_fn=os.setsid)
+            self.log("⏳ Attente de l'ouverture (6s)...")
+            time.sleep(6)
             return True
-        except: return False
+        except Exception as e:
+            self.log(f"❌ Erreur critique : {e}")
+            return False
 
     def connect_driver(self):
         """ Connexion Selenium avec redirection forcée si sur Google """
