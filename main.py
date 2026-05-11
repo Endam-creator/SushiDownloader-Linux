@@ -55,7 +55,7 @@ class SushiApp(tk.Tk):
 
         lbl_instr = tk.Label(
             frame_top,
-            text="L'application gère le lancement de Chromium.\nPlacez-vous sur le premier scan du chapitre une fois ouvert.",
+            text="Lancement via launcher.sh recommandé.\nPlacez-vous sur le premier scan avant de cliquer sur Démarrer.",
             fg="#d32f2f", justify=tk.LEFT
         )
         lbl_instr.pack(side=tk.TOP, pady=5)
@@ -91,51 +91,31 @@ class SushiApp(tk.Tk):
         self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
 
-    def lancer_chromium_automatique(self):
-        """ Nettoie les verrous et lance Chromium via un Shell Bash explicite """
-        self.log("🧹 Nettoyage des sessions...")
-        os.system("pkill -f chromium")
-        
-        lock_file = os.path.join(self.profile_dir, "SingletonLock")
-        if os.path.exists(lock_file):
-            try: os.unlink(lock_file)
-            except: pass
-
-        browser_bin = shutil.which("chromium-browser") or shutil.which("chromium")
-        if not browser_bin: return False
-
-        self.log(f"🚀 Tentative de lancement via Bash : {browser_bin}")
-        
-        # On enveloppe la commande dans 'bash -c' pour garantir l'exécution du '&'
-        inner_cmd = f'{browser_bin} --remote-debugging-port=9222 --user-data-dir="{self.profile_dir}" --no-sandbox --disable-dev-shm-usage --start-maximized https://sushiscan.net'
-        full_cmd = f"/bin/bash -c '{inner_cmd} &' &"
-        
-        try:
-            # On utilise subprocess.Popen pour détacher complètement le processus du binaire Python
-            subprocess.Popen(full_cmd, shell=True, preexec_fn=os.setsid)
-            self.log("⏳ Attente de l'ouverture (6s)...")
-            time.sleep(6)
-            return True
-        except Exception as e:
-            self.log(f"❌ Erreur critique : {e}")
-            return False
-
     def connect_driver(self):
-        """Se connecte uniquement à une instance existante sur le port 9222"""
-        self.log("🔗 Recherche d'une session Chromium sur le port 9222...")
+        """Se connecte à la session Chromium (Universel X64/ARM64)"""
+        self.log("🔗 Tentative de connexion au port 9222...")
+        
         options = Options()
         options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
         options.add_argument("--no-sandbox")
-        service = Service(executable_path="/usr/bin/chromedriver")
+        options.add_argument("--remote-allow-origins=*") # Crucial pour Debian/Ubuntu
+        
+        # Détection dynamique du driver (s'adapte à AlmaLinux, Fedora, PiOS, etc.)
+        driver_bin = (shutil.which("chromedriver") or 
+                     "/usr/bin/chromedriver" or 
+                     "/usr/lib/chromium-browser/chromedriver")
+        
+        service = Service(executable_path=driver_bin)
 
         try:
             self.driver = webdriver.Chrome(service=service, options=options)
-            self.log("✅ Connexion réussie ! Vous pouvez démarrer.")
+            self.log("✅ Connexion réussie ! Pilote prêt.")
             return self.driver
-        except:
-            self.log("❌ Chromium n'est pas détecté.")
-            messagebox.showerror("Erreur", 
-                "Veuillez lancer Chromium avec votre script launcher.sh avant de cliquer sur Démarrer.")
+        except Exception as e:
+            self.log(f"❌ Erreur de connexion : {str(e)[:100]}")
+            messagebox.showerror("Erreur de liaison", 
+                "L'appli n'arrive pas à piloter Chromium.\n\n"
+                "Vérifiez que le launcher a bien ouvert le navigateur.")
             return None
 
     def _ajouter_filigrane(self, original_image):
@@ -152,7 +132,7 @@ class SushiApp(tk.Tk):
         except: return original_image
 
     def demarrer(self):
-        """Orchestre le téléchargement et la capture précise."""
+        """Orchestre le téléchargement avec gestion universelle du Ratio de Pixels (DPI)."""
         val = self.entry_pages.get()
         if not val.isdigit():
             messagebox.showerror("Erreur", "Nombre de pages invalide")
@@ -169,7 +149,7 @@ class SushiApp(tk.Tk):
         self.driver.set_window_size(1600, 2600)
         
         os.makedirs("Downloads", exist_ok=True)
-        self.image_paths = [] # Correction point 1 : On utilise self pour la persistance
+        self.image_paths = [] 
 
         for i in range(1, max_pages + 1):
             if self._cancel_event.is_set():
@@ -189,25 +169,27 @@ class SushiApp(tk.Tk):
                 self.driver.execute_script("window.scrollTo(0, 0);")
                 time.sleep(1.5)
 
-                target_img = self.driver.find_element(By.CSS_SELECTOR, "div#readerarea img")
-                
-                # Calcul précis du format pour éviter les bandes noires
-                rect = self.driver.execute_script("""
-                    var rect = arguments[0].getBoundingClientRect();
+                # --- CALCUL UNIVERSEL DU SCAN (DPI Scaling) ---
+                rect_data = self.driver.execute_script("""
+                    var rect = document.querySelector('div#readerarea img').getBoundingClientRect();
+                    var ratio = window.devicePixelRatio || 1;
                     return {
-                        left: rect.left + window.pageXOffset,
-                        top: rect.top + window.pageYOffset,
-                        width: rect.width,
-                        height: rect.height
+                        left: (rect.left + window.pageXOffset) * ratio,
+                        top: (rect.top + window.pageYOffset) * ratio,
+                        width: rect.width * ratio,
+                        height: rect.height * ratio
                     };
-                """, target_img)
+                """)
 
                 png_data = self.driver.get_screenshot_as_png()
                 full_img = Image.open(io.BytesIO(png_data)).convert("RGB")
 
-                left, top = int(rect['left']), int(rect['top'])
-                right, bottom = left + int(rect['width']), top + int(rect['height'])
+                left = int(rect_data['left'])
+                top = int(rect_data['top'])
+                right = left + int(rect_data['width'])
+                bottom = top + int(rect_data['height'])
 
+                # Crop sécurisé (S'adapte à toute résolution)
                 final_img = full_img.crop((
                     max(0, left), 
                     max(0, top), 
@@ -216,7 +198,6 @@ class SushiApp(tk.Tk):
                 ))
 
                 final_img = self._ajouter_filigrane(final_img)
-                # Utilisation de chemins absolus pour éviter les pertes PyInstaller
                 fname = os.path.abspath(f"Downloads/page_{i:03d}.jpg")
                 final_img.save(fname, quality=95, subsampling=0)
                 
@@ -236,12 +217,9 @@ class SushiApp(tk.Tk):
                 self.log(f"❌ Erreur page {i}: {e}")
                 break
 
-        # Correction point 1 : Appel de la création du PDF
         if self.image_paths and not self._cancel_event.is_set():
             self.log(f"📦 Création du PDF avec {len(self.image_paths)} images...")
             self._creer_pdf(self.image_paths)
-        elif self.image_paths:
-             self.log("⚠️ Images conservées dans /Downloads (Annulation).")
         
         self._reset_boutons()
 
@@ -251,12 +229,11 @@ class SushiApp(tk.Tk):
         try:
             with open(pdf_path, "wb") as f:
                 f.write(img2pdf.convert(image_paths))
-            self.log(f"🎉 PDF créé avec succès : {pdf_path}")
-            # Nettoyage
+            self.log(f"🎉 PDF créé : {pdf_path}")
             for p in image_paths:
                 if os.path.exists(p): os.remove(p)
         except Exception as e:
-            self.log(f"❌ Erreur assemblage PDF: {e}")
+            self.log(f"❌ Erreur PDF: {e}")
 
     def _on_start(self):
         self._cancel_event.clear()
